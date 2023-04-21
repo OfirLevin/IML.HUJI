@@ -7,6 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import plotly.io as pio
+
 pio.templates.default = "simple_white"
 
 
@@ -33,11 +34,14 @@ def preprocess_data(X: pd.DataFrame, y: Optional[pd.Series] = None):
         negative_index = y[y <= 0].index.tolist()
         X.drop(index=negative_index, inplace=True, axis=0)
         y = y[y > 0]
+        X = X.dropna()
+        for column in ['floors', 'bathrooms', 'yr_renovated']:
+            X = X[X[column] >= 0]
+        X = X[X['bedrooms'] < 20]
+        X = X[X['sqft_lot'] < 1000000]
+        X = X[X['sqft_living'] < 10000]
 
     X.drop(columns=["id", "long", "lat", "date", "sqft_living15", "sqft_lot15"], inplace=True)
-    if y is None:
-        for column in ['bedrooms', 'bathrooms']:
-            X = X[X[column] > 0]
 
     X = pd.get_dummies(X, columns=["zipcode"], prefix="zipcode")
 
@@ -48,14 +52,20 @@ def preprocess_data(X: pd.DataFrame, y: Optional[pd.Series] = None):
     X["decade_renovated"] = X["yr_renovated"] // 10 * 10
     X.drop(columns="yr_renovated", inplace=True)
     X = pd.get_dummies(X, columns=["decade_renovated"], prefix="decade_renovated")
-    X.rename(columns={"decade_renovated_0.0" : "not_renovated"})
+    X.rename(columns={"decade_renovated_0.0": "not_renovated"})
 
     if y is not None:
         diff_index = y.index.difference(X.index).tolist()
         y.drop(index=diff_index, inplace=True)
         return X, y
-    return X
 
+    if y is None:
+        for col in X.columns:
+            mean_column = X[X[col] >= 0][col].mean()
+            X[col].fillna(mean_column, inplace=True)
+            X[col].loc[X[col] < 0] = mean_column
+
+    return X
 
 
 def feature_evaluation(X: pd.DataFrame, y: pd.Series, output_path: str = ".") -> NoReturn:
@@ -99,13 +109,7 @@ if __name__ == '__main__':
     # Question 2 - Preprocessing of housing prices dataset
     train_X, train_y = preprocess_data(train_X, train_y)
     test_X = preprocess_data(test_X)
-    test_extra_cols = test_X.columns.difference(train_X.columns).tolist()
-    test_X.drop(index=test_extra_cols, inplace=True, axis='columns')
-    missing_cols = train_X.columns.difference(test_X.columns).tolist()
-    for col in missing_cols:
-        test_X[col] = 0
-    df1 = test_X.reindex(columns=train_X.columns)
-
+    test_X = test_X.reindex(columns=train_X.columns, fill_value=0)
 
     # Question 3 - Feature evaluation with respect to response
     feature_evaluation(train_X, train_y, "./feature_evaluation")
@@ -127,23 +131,22 @@ if __name__ == '__main__':
             model = LinearRegression()
             model.fit(sample_X, sample_y)
             loss_arr_p[j] = model.loss(test_X, test_y)
-        mean_loss_all[p-10] = np.mean(loss_arr_p)
-        std_loss_all[p-10] = np.std(loss_arr_p)
+        mean_loss_all[p - 10] = np.mean(loss_arr_p)
+        std_loss_all[p - 10] = np.std(loss_arr_p)
     fig = go.Figure([go.Scatter(x=p_list, y=mean_loss_all, marker=dict(color="darkslateblue")),
-                    go.Scatter(x=p_list, y=mean_loss_all + 2*std_loss_all,
-                               mode='lines',
-                               line=dict(width=0),
-                               showlegend=False),
-                    go.Scatter(x=p_list, y=mean_loss_all - 2*std_loss_all,
-                               line=dict(width=0),
-                               mode='lines',
-                               fillcolor='rgba(20, 100, 200, 0.3)',
-                               fill='tonexty',
-                               showlegend=False)],
+                     go.Scatter(x=p_list, y=mean_loss_all + 2 * std_loss_all,
+                                mode='lines',
+                                line=dict(width=0),
+                                showlegend=False),
+                     go.Scatter(x=p_list, y=mean_loss_all - 2 * std_loss_all,
+                                line=dict(width=0),
+                                mode='lines',
+                                fillcolor='rgba(20, 100, 200, 0.3)',
+                                fill='tonexty',
+                                showlegend=False)],
                     layout=go.Layout(title="Mean loss as a function of training set percentage",
                                      xaxis=dict(title="Percentage of sample from training set"),
                                      yaxis=dict(title="MSE Over Test Set"),
                                      showlegend=False)
                     )
-    fig.show()
     fig.write_image("./MSE_percentage.png")
